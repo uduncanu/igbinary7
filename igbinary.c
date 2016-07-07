@@ -1921,7 +1921,7 @@ inline static int igbinary_unserialize_array(struct igbinary_unserialize_data *i
 	if ((flags & WANT_OBJECT) == 0) {
 		array_init_size(z, n + 1);
 
-		if (flags & WANT_REF) {
+		/* if (flags & WANT_REF) { */
 			/* references */
 			if (igsd->references_count + 1 >= igsd->references_capacity) {
 				while (igsd->references_count + 1 >= igsd->references_capacity) {
@@ -1937,7 +1937,7 @@ inline static int igbinary_unserialize_array(struct igbinary_unserialize_data *i
 			IGB_REF_VAL(igsd, igsd->references_count++) = z;
 			ZVAL_MAKE_REF(z);
 			ZVAL_DEREF(z);
-		}
+		/* } */
 	}
 
 	/* empty array */

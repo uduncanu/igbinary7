@@ -112,6 +112,6 @@ foreach ($data as $item) {
 
 echo $all_passed ? 'OK' : 'ERROR', "\n";
 
+// It seems like object ids in var_dump now start from 1?
 --EXPECT--
-reference deserialization works, but the result is not a reference.
 OK
