@@ -973,13 +973,10 @@ inline static int igbinary_serialize_chararray(struct igbinary_serialize_data *i
 /** Serializes array or objects inner properties. */
 inline static int igbinary_serialize_array(struct igbinary_serialize_data *igsd, zval *z, bool object, bool incomplete_class TSRMLS_DC) {
 	HashTable *h;
-	HashPosition pos;
 	size_t n;
 	zval *d;
 
 	zend_string *key;
-	uint key_len;
-	int key_type;
 	ulong key_index;
 
 	/* hash */
@@ -1148,8 +1145,6 @@ inline static int igbinary_serialize_array_sleep(struct igbinary_serialize_data 
 	zval *v;
 
 	zend_string *key;
-	uint key_len;
-	int key_type;
 	ulong key_index;
 
 	/* Decrease array size by one, because of magic member (with class name) */
@@ -1590,6 +1585,7 @@ inline static int igbinary_unserialize_data_init(struct igbinary_unserialize_dat
 	igsd->strings = (struct igbinary_unserialize_string_pair *) emalloc(sizeof(struct igbinary_unserialize_string_pair) * igsd->strings_capacity);
 	if (igsd->strings == NULL) {
 		efree(igsd->references);
+		igsd->references = NULL;
 		return 1;
 	}
 
@@ -1602,10 +1598,12 @@ inline static int igbinary_unserialize_data_init(struct igbinary_unserialize_dat
 inline static void igbinary_unserialize_data_deinit(struct igbinary_unserialize_data *igsd TSRMLS_DC) {
 	if (igsd->strings) {
 		efree(igsd->strings);
+		igsd->strings = NULL;
 	}
 
 	if (igsd->references) {
 		efree(igsd->references);
+		igsd->references = NULL;
 	}
 
 	smart_string_free(&igsd->string0_buf);
@@ -2112,7 +2110,6 @@ inline static int igbinary_unserialize_object_ser(struct igbinary_unserialize_da
  */
 inline static int igbinary_unserialize_object(struct igbinary_unserialize_data *igsd, enum igbinary_type t, zval *z, int flags TSRMLS_DC) {
 	zend_class_entry *ce;
-	zend_class_entry **pce;
 
 	zval h;
 	zval f;
@@ -2147,7 +2144,7 @@ inline static int igbinary_unserialize_object(struct igbinary_unserialize_data *
 
 	do {
 		/* Try to find class directly */
-		if (ce = zend_lookup_class(class_name TSRMLS_CC)) {
+		if ((ce = zend_lookup_class(class_name TSRMLS_CC)) != NULL) {
 			/* FIXME: lookup class may cause exception in load callback */
 			break;
 		}
@@ -2313,7 +2310,6 @@ static int igbinary_unserialize_zval(struct igbinary_unserialize_data *igsd, zva
 	long tmp_long;
 	double tmp_double;
 	char *tmp_chararray;
-	zval *zp;
 	size_t tmp_size_t;
 	size_t ref_n;
 
