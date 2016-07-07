@@ -1097,7 +1097,7 @@ inline static int igbinary_serialize_array_ref(struct igbinary_serialize_data *i
 	} else if (object && Z_TYPE_P(z) == IS_OBJECT) {
 		zend_object* o = Z_OBJ_P(z);
 		key_ptr = o;
-		key_ptr = sizeof(zend_object*);
+		key_len = sizeof(zend_object*);
 	} else {
 		/* FIXME: in most cases a pointer to zval becomes useless in php 7 */
 		/* FIXME: switch on this? */
