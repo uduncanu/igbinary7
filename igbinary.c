@@ -780,6 +780,7 @@ inline static int igbinary_serialize_bool(struct igbinary_serialize_data *igsd, 
 /* }}} */
 /* {{{ igbinary_serialize_long */
 /** Serializes long. */
+/** FIXME this should probably be zend_long for 32-bit builds, php7 got rid of 32-bit longs */
 inline static int igbinary_serialize_long(struct igbinary_serialize_data *igsd, long l TSRMLS_DC) {
 	long k = l >= 0 ? l : -l;
 	bool p = l >= 0 ? true : false;
@@ -925,6 +926,8 @@ inline static int igbinary_serialize_string(struct igbinary_serialize_data *igsd
 				return 1;
 			}
 		}
+		// FIXME: technically, 64-bit strings are allowed in php7, but it's not as if you can store gigabytes in memcache.
+		// Throw an error if a string is too long?
 	}
 
 	return 0;
@@ -957,6 +960,8 @@ inline static int igbinary_serialize_chararray(struct igbinary_serialize_data *i
 		if (igbinary_serialize32(igsd, len TSRMLS_CC) != 0) {
 			return 1;
 		}
+		// FIXME: technically, 64-bit strings are allowed in php7, but it's not as if you can store gigabytes in memcache.
+		// Throw an error if a string is too long?
 	}
 
 	if (igbinary_serialize_resize(igsd, len TSRMLS_CC)) {
