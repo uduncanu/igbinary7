@@ -248,7 +248,7 @@ ZEND_END_ARG_INFO()
 zend_function_entry igbinary_functions[] = {
 	PHP_FE(igbinary_serialize,                arginfo_igbinary_serialize)
 	PHP_FE(igbinary_unserialize,              arginfo_igbinary_unserialize)
-	{NULL, NULL, NULL}
+	PHP_FE_END
 };
 /* }}} */
 
@@ -264,7 +264,7 @@ static const zend_module_dep igbinary_module_deps[] = {
 #elif defined(HAVE_APC_SUPPORT)
 	ZEND_MOD_OPTIONAL("apc")
 #endif
-	{NULL, NULL, NULL}
+	ZEND_MOD_END
 };
 #endif
 /* }}} */
@@ -378,16 +378,19 @@ PHP_MINFO_FUNCTION(igbinary) {
 /* {{{ Memory allocator wrappers */
 static inline void *igbinary_mm_wrapper_malloc(size_t size, void *context)
 {
+	(void)context;  // context is unused in this implementation, suppress warning.
     return emalloc(size);
 }
 
 static inline void *igbinary_mm_wrapper_realloc(void *ptr, size_t size, void *context)
 {
+	(void)context;  // context is unused in this implementation, suppress warning.
     return erealloc(ptr, size);
 }
 
 static inline void igbinary_mm_wrapper_free(void *ptr, void *context)
 {
+	(void)context;  // context is unused in this implementation, suppress warning.
     return efree(ptr);
 }
 /* }}} */
@@ -1077,7 +1080,7 @@ inline static int igbinary_serialize_array(struct igbinary_serialize_data *igsd,
 inline static int igbinary_serialize_array_ref(struct igbinary_serialize_data *igsd, zval *z, bool object TSRMLS_DC) {
 	uint32_t t = 0;
 	uint32_t *i = &t;
-	const char* key_ptr = NULL;
+	const char* key = NULL;
 	uint32_t key_len = 0;
 
 	if (Z_TYPE_P(z) == IS_ARRAY) {
@@ -1088,15 +1091,15 @@ inline static int igbinary_serialize_array_ref(struct igbinary_serialize_data *i
 		/* scalars are not, undef too. */
 		/* Assume that arData uniquely identifies the array for now, TODO revisit */
 		Bucket *b = Z_ARR_P(z)->arData;
-		key_ptr = b;
+		key = (char*) b;
 		key_len = sizeof(Bucket*);
 	} else if (Z_REFCOUNTED_P(z)) {
 		/* FIXME? what if there are multiple references? */
-		key_ptr = &(z->value);
+		key = (char*) &(z->value);
 		key_len = sizeof(zval);
 	} else if (object && Z_TYPE_P(z) == IS_OBJECT) {
 		zend_object* o = Z_OBJ_P(z);
-		key_ptr = o;
+		key = (char*) o;
 		key_len = sizeof(zend_object*);
 	} else {
 		/* FIXME: in most cases a pointer to zval becomes useless in php 7 */
@@ -1105,9 +1108,9 @@ inline static int igbinary_serialize_array_ref(struct igbinary_serialize_data *i
 		return 1;
 	}
 
-	if (hash_si_find(&igsd->objects, key_ptr, key_len, i) == 1) {
+	if (hash_si_find(&igsd->objects, key, key_len, i) == 1) {
 		t = hash_si_size(&igsd->objects);
-		hash_si_insert(&igsd->objects, key_ptr, key_len, t);
+		hash_si_insert(&igsd->objects, key, key_len, t);
 		return 1;
 	} else {
 		enum igbinary_type type;
@@ -1150,13 +1153,11 @@ inline static int igbinary_serialize_array_ref(struct igbinary_serialize_data *i
 /** Serializes object's properties array with __sleep -function. */
 inline static int igbinary_serialize_array_sleep(struct igbinary_serialize_data *igsd, zval *z, HashTable *h, zend_class_entry *ce, bool incomplete_class TSRMLS_DC) {
 	HashTable *object_properties;
-	HashPosition pos;
 	size_t n = zend_hash_num_elements(h);
 	zval *d;
 	zval *v;
 
 	zend_string *key;
-	ulong key_index;
 
 	/* Decrease array size by one, because of magic member (with class name) */
 	if (n > 0 && incomplete_class) {
@@ -1196,7 +1197,7 @@ inline static int igbinary_serialize_array_sleep(struct igbinary_serialize_data 
 
 	object_properties = Z_OBJPROP_P(z);
 
-	ZEND_HASH_FOREACH_KEY_VAL(h, key_index, key, d) {
+	ZEND_HASH_FOREACH_STR_KEY_VAL(h, key, d) {
 		/* skip magic member in incomplete classes */
 		if (incomplete_class && key != NULL && strcmp(ZSTR_VAL(key), MAGIC_MEMBER) == 0) {
 			continue;
@@ -1932,6 +1933,7 @@ inline static int igbinary_unserialize_array(struct igbinary_unserialize_data *i
 	if ((flags & WANT_OBJECT) == 0) {
 		array_init_size(z, n + 1);
 
+		// FIXME Are there cases where WANT_REF is necessary? Trying to preserve php5 compatibility.
 		/* if (flags & WANT_REF) { */
 			/* references */
 			if (igsd->references_count + 1 >= igsd->references_capacity) {
