@@ -1077,31 +1077,36 @@ inline static int igbinary_serialize_array(struct igbinary_serialize_data *igsd,
 inline static int igbinary_serialize_array_ref(struct igbinary_serialize_data *igsd, zval *z, bool object TSRMLS_DC) {
 	uint32_t t = 0;
 	uint32_t *i = &t;
-	zend_value key = { 0 };
+	const char* key_ptr = NULL;
+	uint32_t key_len = 0;
 
 	if (Z_TYPE_P(z) == IS_ARRAY) {
-		key = z->value;
-		return 1;
-	} else if (Z_REFCOUNTED_P(z)) {
-		key = z->value;
-	} else if (object && Z_TYPE_P(z) == IS_OBJECT) {
-		key.obj = Z_OBJ_P(z);
-	} else if (Z_TYPE_P(z) == IS_ARRAY) {
 		/* FIXME: should be default action? */
 		/* FIXME: could use Z_REFCOUNTED_P(z) ? */
 		/* Complex types and pointer backed numbers are safe because  */
 		/* they should remain unique. Longs and doubles as user given */
 		/* scalars are not, undef too. */
-		key = z->value;
+		/* Assume that arData uniquely identifies the array for now, TODO revisit */
+		Bucket *b = Z_ARR_P(z)->arData;
+		key_ptr = b;
+		key_len = sizeof(Bucket*);
+	} else if (Z_REFCOUNTED_P(z)) {
+		key_ptr = &(z->value);
+		key_len = sizeof(zval);
+	} else if (object && Z_TYPE_P(z) == IS_OBJECT) {
+		zend_object* o = Z_OBJ_P(z);
+		key_ptr = o;
+		key_ptr = sizeof(zend_object*);
 	} else {
 		/* FIXME: in most cases a pointer to zval becomes useless in php 7 */
-		key.zv = z;
+		/* FIXME: switch on this? */
+		/* key.zv = z; */
 		return 1;
 	}
 
-	if (hash_si_find(&igsd->objects, (char *)&key, sizeof(key), i) == 1) {
+	if (hash_si_find(&igsd->objects, key_ptr, key_len, i) == 1) {
 		t = hash_si_size(&igsd->objects);
-		hash_si_insert(&igsd->objects, (char *)&key, sizeof(key), t);
+		hash_si_insert(&igsd->objects, key_ptr, key_len, t);
 		return 1;
 	} else {
 		enum igbinary_type type;
