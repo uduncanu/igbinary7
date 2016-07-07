@@ -1091,6 +1091,7 @@ inline static int igbinary_serialize_array_ref(struct igbinary_serialize_data *i
 		key_ptr = b;
 		key_len = sizeof(Bucket*);
 	} else if (Z_REFCOUNTED_P(z)) {
+		/* FIXME? what if there are multiple references? */
 		key_ptr = &(z->value);
 		key_len = sizeof(zval);
 	} else if (object && Z_TYPE_P(z) == IS_OBJECT) {
@@ -1535,7 +1536,7 @@ static int igbinary_serialize_zval(struct igbinary_serialize_data *igsd, zval *z
 
 		/* Complex types serialize a reference, scalars do not... */
 		/* FIXME: Absolutely wrong level to check this. */
-		if (igbinary_serialize_array_ref(igsd, z, false TSRMLS_CC) == 0) {
+		if (igbinary_serialize_array_ref(igsd, z, (Z_TYPE_P(Z_REFVAL_P(z)) == IS_OBJECT) TSRMLS_CC) == 0) {
 			return 0;
 		}
 		ZVAL_DEREF(z);
