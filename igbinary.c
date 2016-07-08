@@ -1056,6 +1056,7 @@ inline static int igbinary_serialize_array(struct igbinary_serialize_data *igsd,
 			return 1;
 		}
 
+		// https://wiki.php.net/phpng-int - This is a weak pointer, completely different from a PHP reference (&$foo IS_REFERENCE)
 		if (Z_TYPE_P(d) == IS_INDIRECT) {
 			d = Z_INDIRECT_P(d);
 		}
@@ -1076,41 +1077,30 @@ inline static int igbinary_serialize_array(struct igbinary_serialize_data *igsd,
 }
 /* }}} */
 /* {{{ igbinary_serialize_array_ref */
-/** Serializes array reference. */
+/** Serializes array reference (or reference in an object). Returns 0 on success. */
 inline static int igbinary_serialize_array_ref(struct igbinary_serialize_data *igsd, zval *z, bool object TSRMLS_DC) {
 	uint32_t t = 0;
 	uint32_t *i = &t;
-	const char* key = NULL;
-	uint32_t key_len = 0;
+	zend_ulong key = 0;  // The numeric value of the pointer to the zend_refcounted struct
 
-	if (Z_TYPE_P(z) == IS_ARRAY) {
-		/* FIXME: should be default action? */
-		/* FIXME: could use Z_REFCOUNTED_P(z) ? */
-		/* Complex types and pointer backed numbers are safe because  */
-		/* they should remain unique. Longs and doubles as user given */
-		/* scalars are not, undef too. */
-		/* Assume that arData uniquely identifies the array for now, TODO revisit */
-		Bucket *b = Z_ARR_P(z)->arData;
-		key = (char*) b;
-		key_len = sizeof(Bucket*);
-	} else if (Z_REFCOUNTED_P(z)) {
-		/* FIXME? what if there are multiple references? */
-		key = (char*) &(z->value);
-		key_len = sizeof(zval);
-	} else if (object && Z_TYPE_P(z) == IS_OBJECT) {
-		zend_object* o = Z_OBJ_P(z);
-		key = (char*) o;
-		key_len = sizeof(zend_object*);
+	// Similar to php_var_serialize_intern's first part, as well as php_add_var_hash, for printing R: (reference) or r:(object)
+	// However, it differs from the built in serialize() in that references to objects are preserved when serializing and unserializing? (TODO check, test for backwards compatibility)
+	zend_bool is_ref = Z_ISREF_P(z);
+	// printf("is_ref=%d Z_TYPE_P=%d\n", (int)(is_ref), (int)(Z_TYPE_P(z)));
+	if (is_ref || Z_TYPE_P(z) == IS_ARRAY || (object && Z_TYPE_P(z) == IS_OBJECT)) {
 	} else {
+		// printf("nope is_ref=%d Z_TYPE_P=%d\n", (int)(is_ref), (int)(Z_TYPE_P(z)));
 		/* FIXME: in most cases a pointer to zval becomes useless in php 7 */
 		/* FIXME: switch on this? */
 		/* key.zv = z; */
 		return 1;
 	}
 
-	if (hash_si_find(&igsd->objects, key, key_len, i) == 1) {
+	key = (zend_ulong) (zend_uintptr_t) Z_COUNTED_P(z);
+
+	if (hash_si_find(&igsd->objects, (const char*) &key, sizeof(key), i) == 1) {
 		t = hash_si_size(&igsd->objects);
-		hash_si_insert(&igsd->objects, key, key_len, t);
+		hash_si_insert(&igsd->objects, (const char*) &key, sizeof(key), t);  // TODO: Add a specialization for fixed-length numeric keys?
 		return 1;
 	} else {
 		enum igbinary_type type;
@@ -1392,7 +1382,7 @@ inline static int igbinary_serialize_object(struct igbinary_serialize_data *igsd
 
 
 	if (igbinary_serialize_array_ref(igsd, z, true TSRMLS_CC) == 0) {
-		return r;
+		return 0;
 	}
 
 	ce = Z_OBJCE_P(z);

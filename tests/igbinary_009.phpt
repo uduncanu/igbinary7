@@ -22,6 +22,8 @@ function test($type, $variable, $test = true) {
 	ob_start();
 	var_dump($unserialized);
 	$dump_act = ob_get_clean();
+	debug_zval_dump($variable);
+	debug_zval_dump($unserialized);
 
 
 	if ($dump_act !== $dump_exp) {
@@ -32,6 +34,7 @@ function test($type, $variable, $test = true) {
 $a = array('foo');
 
 test('array($a, $a)', array($a, $a), true);
+// TODO igbinary is unserializing this incorrectly as [$a, $a] instead of [&$a, &$a].
 test('array(&$a, &$a)', array(&$a, &$a), true);
 
 $a = array(null);
@@ -39,6 +42,7 @@ $b = array(&$a);
 $a[0] = &$b;
 
 test('cyclic $a = array(&array(&$a))', $a, false);
+var_dump($a);
 
 --EXPECT--
 array($a, $a)
