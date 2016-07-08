@@ -138,7 +138,8 @@ struct igbinary_serialize_data {
 	bool scalar;				/**< Serializing scalar. */
 	bool compact_strings;		/**< Check for duplicate strings. */
 	struct hash_si strings;		/**< Hash of already serialized strings. */
-	struct hash_si objects;		/**< Hash of already serialized objects. */
+	struct hash_si references;	/**< Hash of already serialized potential references. */
+	int references_id;		/**< Number of things that the unserializer might think are references. >= length of references */
 	int string_count;			/**< Serialized string count, used for back referencing */
 	int error;					/**< Error number. Not used. */
 	struct igbinary_memory_manager	mm; /**< Memory management functions. */
@@ -666,7 +667,8 @@ inline static int igbinary_serialize_data_init(struct igbinary_serialize_data *i
 	igsd->scalar = scalar;
 	if (!igsd->scalar) {
 		hash_si_init(&igsd->strings, 16);
-		hash_si_init(&igsd->objects, 16);
+		hash_si_init(&igsd->references, 16);
+		igsd->references_id = 0;
 	}
 
 	igsd->compact_strings = (bool)IGBINARY_G(compact_strings);
@@ -683,7 +685,7 @@ inline static void igbinary_serialize_data_deinit(struct igbinary_serialize_data
 
 	if (!igsd->scalar) {
 		hash_si_deinit(&igsd->strings);
-		hash_si_deinit(&igsd->objects);
+		hash_si_deinit(&igsd->references);
 	}
 }
 /* }}} */
@@ -1086,21 +1088,19 @@ inline static int igbinary_serialize_array_ref(struct igbinary_serialize_data *i
 	// Similar to php_var_serialize_intern's first part, as well as php_add_var_hash, for printing R: (reference) or r:(object)
 	// However, it differs from the built in serialize() in that references to objects are preserved when serializing and unserializing? (TODO check, test for backwards compatibility)
 	zend_bool is_ref = Z_ISREF_P(z);
-	// printf("is_ref=%d Z_TYPE_P=%d\n", (int)(is_ref), (int)(Z_TYPE_P(z)));
-	if (is_ref || Z_TYPE_P(z) == IS_ARRAY || (object && Z_TYPE_P(z) == IS_OBJECT)) {
-	} else {
-		// printf("nope is_ref=%d Z_TYPE_P=%d\n", (int)(is_ref), (int)(Z_TYPE_P(z)));
-		/* FIXME: in most cases a pointer to zval becomes useless in php 7 */
-		/* FIXME: switch on this? */
-		/* key.zv = z; */
+	if (!is_ref && Z_TYPE_P(z) != IS_OBJECT) {
+		// Nothing else is going to reference this when this is serialized, this isn't ref counted or an object. Increment the reference id for the deserializer, give up.
+		++igsd->references_id;
 		return 1;
 	}
 
+	// is_ref || IS_OBJECT implies it has a unique refcounted struct
+
 	key = (zend_ulong) (zend_uintptr_t) Z_COUNTED_P(z);
 
-	if (hash_si_find(&igsd->objects, (const char*) &key, sizeof(key), i) == 1) {
-		t = hash_si_size(&igsd->objects);
-		hash_si_insert(&igsd->objects, (const char*) &key, sizeof(key), t);  // TODO: Add a specialization for fixed-length numeric keys?
+	if (hash_si_find(&igsd->references, (const char*) &key, sizeof(key), i) == 1) {
+		t = igsd->references_id++;
+		hash_si_insert(&igsd->references, (const char*) &key, sizeof(key), t);  // TODO: Add a specialization for fixed-length numeric keys?
 		return 1;
 	} else {
 		enum igbinary_type type;
