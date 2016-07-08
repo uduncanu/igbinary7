@@ -68,6 +68,8 @@ SIMPLE_REF := '25' ARRAY_REF
          => 1 (The first object in the hash)
 
 ; cyclic $a = array(&array(&$a)). Note that the value $a was passed to the serializer, not the reference &$a, so there is a third array.
+; 14020600140106001103666f6f06010101
+;
 14 (array 8)
   01 (1 element)
     0600 0 =>
@@ -80,4 +82,15 @@ SIMPLE_REF := '25' ARRAY_REF
               01 (size 1)
                 0600 0 =>
                 25 (is ref)
-                  01 01 (The first array reference in the hash)
+                  01 01 (The 01th(second) array reference (first non-toplevel) in the hash)
+
+; 140106002514010600250100
+14 (array 8)
+  01 (1 element)
+    0600 0 =>
+    25 (is ref)
+      14 (array 8)
+        01 (1 element)
+          0600 (0 => )
+          25 (is ref)
+            01 00 (The top-level array reference in the hash)

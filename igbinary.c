@@ -2296,6 +2296,7 @@ inline static int igbinary_unserialize_ref(struct igbinary_unserialize_data *igs
 	}
 
 	ZVAL_COPY(z, IGB_REF_VAL(igsd, n));
+	/* FIXME(tyson) figure out which are IS_REFERENCE, which aren't, and cast the types to that. Also test/fix reference counts for garbage collection. */
 	if (t == igbinary_type_objref8 || t == igbinary_type_objref16 || t == igbinary_type_objref32) {
 		/* FIXME: clear/set ref.. */
 		/*Z_SET_ISREF_TO_P(z, false);*/
