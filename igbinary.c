@@ -2225,11 +2225,17 @@ inline static int igbinary_unserialize_object(struct igbinary_unserialize_data *
 		case igbinary_type_array8:
 		case igbinary_type_array16:
 		case igbinary_type_array32:
-			object_init_ex(IGB_REF_VAL(igsd, ref_n), ce);
+			if (object_init_ex(IGB_REF_VAL(igsd, ref_n), ce) != SUCCESS) {
+				php_error_docref(NULL TSRMLS_CC, E_NOTICE, "igbinary unable to create object for class entry");
+				r = 1;
+				break;
+			}
+			/*printf("\nunserializing object n=%lld is_ref=%d type=%d igbinary_type=%d\n", (long long)ref_n, (int)Z_ISREF_P(IGB_REF_VAL(igsd, ref_n)), (int)Z_TYPE_P(IGB_REF_VAL(igsd, ref_n)), (int)t);*/
 			if (incomplete_class) {
 				php_store_class_name(IGB_REF_VAL(igsd, ref_n), name, name_len);
 			}
 			r = igbinary_unserialize_array(igsd, t, IGB_REF_VAL(igsd, ref_n), WANT_OBJECT TSRMLS_CC);
+			/*printf("\nunserializing object step 2 n=%lld is_ref=%d type=%d igbinary_type=%d\n", (long long)ref_n, (int)Z_ISREF_P(IGB_REF_VAL(igsd, ref_n)), (int)Z_TYPE_P(IGB_REF_VAL(igsd, ref_n)), (int)t);*/
 			break;
 		case igbinary_type_object_ser8:
 		case igbinary_type_object_ser16:
@@ -2244,18 +2250,31 @@ inline static int igbinary_unserialize_object(struct igbinary_unserialize_data *
 			r = 1;
 	}
 
-	if (r == 0 &&
-		Z_OBJCE_P(IGB_REF_VAL(igsd, ref_n)) != PHP_IC_ENTRY &&
-		zend_hash_str_exists(&Z_OBJCE_P(IGB_REF_VAL(igsd, ref_n))->function_table, "__wakeup", sizeof("__wakeup") - 1)) {
-		ZVAL_UNDEF(&h);
-		ZVAL_STRINGL(&f, "__wakeup", sizeof("__wakeup") - 1);
-		call_user_function_ex(CG(function_table), IGB_REF_VAL(igsd, ref_n), &f, &h, 0, 0, 1, NULL TSRMLS_CC);
+	if (r == 0) {
+		// TODO helper function
+		zval *ztemp = IGB_REF_VAL(igsd, ref_n);
+		zend_class_entry *ztemp_ce;
+		if (Z_ISREF_P(ztemp)) {  // May have created a reference while deserializing an object, if it was recursive.
+			ztemp = Z_REFVAL_P(ztemp);
+		}
+		/*printf("\nunserializing n=%lld is_ref=%d type=%d igbinary_type=%d\n", (long long)ref_n, (int)Z_ISREF_P(ztemp), (int)Z_TYPE_P(ztemp), (int)t); */
+		if (Z_TYPE_P(ztemp) != IS_OBJECT) {
+			zend_error(E_WARNING, "igbinary_unserialize_object preparing to __wakeup: created non-object somehow?", t, igsd->buffer_offset);
+			return 1;
+		}
+		ztemp_ce = Z_OBJCE_P(ztemp);
+		if (ztemp_ce != PHP_IC_ENTRY &&
+			zend_hash_str_exists(&ztemp_ce->function_table, "__wakeup", sizeof("__wakeup") - 1)) {
+			ZVAL_UNDEF(&h);
+			ZVAL_STRINGL(&f, "__wakeup", sizeof("__wakeup") - 1);
+			call_user_function_ex(CG(function_table), IGB_REF_VAL(igsd, ref_n), &f, &h, 0, 0, 1, NULL TSRMLS_CC);
 
-		zval_dtor(&f);
-		zval_ptr_dtor(&h);
+			zval_dtor(&f);
+			zval_ptr_dtor(&h);
 
-		if (EG(exception)) {
-			r = 1;
+			if (EG(exception)) {
+				r = 1;
+			}
 		}
 	}
 
