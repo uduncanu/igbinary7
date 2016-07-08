@@ -379,19 +379,19 @@ PHP_MINFO_FUNCTION(igbinary) {
 /* {{{ Memory allocator wrappers */
 static inline void *igbinary_mm_wrapper_malloc(size_t size, void *context)
 {
-	(void)context;  // context is unused in this implementation, suppress warning.
+    (void)context;  // context is unused in this implementation, suppress warning.
     return emalloc(size);
 }
 
 static inline void *igbinary_mm_wrapper_realloc(void *ptr, size_t size, void *context)
 {
-	(void)context;  // context is unused in this implementation, suppress warning.
+    (void)context;  // context is unused in this implementation, suppress warning.
     return erealloc(ptr, size);
 }
 
 static inline void igbinary_mm_wrapper_free(void *ptr, void *context)
 {
-	(void)context;  // context is unused in this implementation, suppress warning.
+    (void)context;  // context is unused in this implementation, suppress warning.
     return efree(ptr);
 }
 /* }}} */
@@ -1088,15 +1088,22 @@ inline static int igbinary_serialize_array_ref(struct igbinary_serialize_data *i
 	// Similar to php_var_serialize_intern's first part, as well as php_add_var_hash, for printing R: (reference) or r:(object)
 	// However, it differs from the built in serialize() in that references to objects are preserved when serializing and unserializing? (TODO check, test for backwards compatibility)
 	zend_bool is_ref = Z_ISREF_P(z);
-	if (!is_ref && Z_TYPE_P(z) != IS_OBJECT) {
+	if (is_ref || Z_TYPE_P(z) == IS_OBJECT) {
+		// is_ref || IS_OBJECT implies it has a unique refcounted struct
+		key = (zend_ulong) (zend_uintptr_t) Z_COUNTED_P(z);
+	} else if (Z_TYPE_P(z) == IS_ARRAY) {
+		const zend_array* arr = Z_ARR_P(z);
+		// Use the pointer to the zend_array
+		key = (zend_ulong) (zend_uintptr_t) arr;
+	} else {
+		printf("not a counted type\n");
 		// Nothing else is going to reference this when this is serialized, this isn't ref counted or an object. Increment the reference id for the deserializer, give up.
 		++igsd->references_id;
 		return 1;
 	}
 
-	// is_ref || IS_OBJECT implies it has a unique refcounted struct
+	// printf("\nkey=%lld is_ref=%d type=%d\n", (long long)key, (int)is_ref, (int)Z_TYPE_P(z));
 
-	key = (zend_ulong) (zend_uintptr_t) Z_COUNTED_P(z);
 
 	if (hash_si_find(&igsd->references, (const char*) &key, sizeof(key), i) == 1) {
 		t = igsd->references_id++;
@@ -1106,6 +1113,7 @@ inline static int igbinary_serialize_array_ref(struct igbinary_serialize_data *i
 		enum igbinary_type type;
 		if (*i <= 0xff) {
 			type = object ? igbinary_type_objref8 : igbinary_type_ref8;
+			/*printf("\nserializing key=%lld is_ref=%d type=%d igbinary_type=%d\n", (long long)key, (int)is_ref, (int)Z_TYPE_P(z), (int)type);*/
 			if (igbinary_serialize8(igsd, (uint8_t) type TSRMLS_CC) != 0) {
 				return 1;
 			}
@@ -1938,8 +1946,8 @@ inline static int igbinary_unserialize_array(struct igbinary_unserialize_data *i
 
 			/*ZVAL_COPY_VALUE(IGB_REF_VAL(igsd, igsd->references_count++), z);*/
 			IGB_REF_VAL(igsd, igsd->references_count++) = z;
-			ZVAL_MAKE_REF(z);
-			ZVAL_DEREF(z);
+			/* ZVAL_MAKE_REF(z); */
+			/* ZVAL_DEREF(z); */
 		/* } */
 	}
 
@@ -2260,6 +2268,7 @@ inline static int igbinary_unserialize_object(struct igbinary_unserialize_data *
 /** Unserializes array or object by reference. */
 inline static int igbinary_unserialize_ref(struct igbinary_unserialize_data *igsd, enum igbinary_type t, zval *z TSRMLS_DC) {
 	size_t n;
+	zval* z_ref = NULL;
 
 	if (t == igbinary_type_ref8 || t == igbinary_type_objref8) {
 		if (igsd->buffer_offset + 1 > igsd->buffer_size) {
@@ -2295,9 +2304,21 @@ inline static int igbinary_unserialize_ref(struct igbinary_unserialize_data *igs
 		ZVAL_UNDEF(z);
 	}
 
-	ZVAL_COPY(z, IGB_REF_VAL(igsd, n));
+	z_ref = IGB_REF_VAL(igsd, n);
+	if (!Z_ISREF_P(z_ref)) {
+		// Permanently convert the zval in IGB_REF_VAL() into a IS_REFERENCE if it wasn't already one.
+		// TODO: Can there properly be multiple reference groups to an object?
+		// Similar to https://github.com/php/php-src/blob/master/ext/standard/var_unserializer.re , for "R:"
+		ZVAL_NEW_REF(z_ref, z_ref);
+	}
+	ZVAL_COPY(z, z_ref);
+	/*if (t == igbinary_type_ref8) {
+		printf("\nunserializing n=%lld is_ref=%d type=%d igbinary_type=%d\n", (long long)n, (int)Z_ISREF_P(z), (int)Z_TYPE_P(z), (int)t);
+	}*/
 	/* FIXME(tyson) figure out which are IS_REFERENCE, which aren't, and cast the types to that. Also test/fix reference counts for garbage collection. */
 	if (t == igbinary_type_objref8 || t == igbinary_type_objref16 || t == igbinary_type_objref32) {
+			/* ZVAL_MAKE_REF(z); */
+			/* ZVAL_DEREF(z); */
 		/* FIXME: clear/set ref.. */
 		/*Z_SET_ISREF_TO_P(z, false);*/
 		/*ZVAL_MAKE_REF(z);*/
