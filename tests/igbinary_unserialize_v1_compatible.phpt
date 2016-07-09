@@ -100,7 +100,11 @@ foreach ($data as $item) {
 
 	if ($dump_expected !== $dump_actual) {
 		if ($item['description'] == 'reference' && gettype($var) === gettype($unserialized)) {
+			echo bin2hex(base64_decode($item['data'])) . "\n";
+			echo bin2hex(igbinary_serialize($var)) . "\n";
 			echo "reference deserialization works, but the result is not a reference.\n";
+			echo "Expected:\n", $dump_expected, "\n";
+			echo "Actual:\n", $dump_actual, "\n";
 			continue;
 		}
 

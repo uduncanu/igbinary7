@@ -27,7 +27,7 @@ function test($type, $variable, $test = true) {
 
 
 	if ($dump_act !== $dump_exp) {
-		echo "But var dump differs:\n", $dump_act, "\n", $dump_exp, "\n";
+		printf("But var dump differs:\nActual\n%sExpected\n%s", $dump_act, $dump_exp);
 	}
 }
 
@@ -41,8 +41,11 @@ $a = array(null);
 $b = array(&$a);
 $a[0] = &$b;
 
+// this might also be working properly. print_r() does something serializes as array() if the last reference to $b is removed.
 test('cyclic $a = array(&array(&$a))', $a, false);
-var_dump($a);
+unset($b);
+printf("a = ...\n");
+debug_zval_dump($a);
 
 --EXPECT--
 array($a, $a)

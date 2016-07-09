@@ -72,6 +72,8 @@ static int APC_SERIALIZER_NAME(igbinary) (APC_SERIALIZER_ARGS);
 static int APC_UNSERIALIZER_NAME(igbinary) (APC_UNSERIALIZER_ARGS);
 #endif
 
+// #define DEBUG_SERIALIZATION
+
 /* {{{ Types */
 enum igbinary_type {
 	/* 00 */ igbinary_type_null,			/**< Null. */
@@ -231,7 +233,7 @@ inline static int igbinary_unserialize_chararray(struct igbinary_unserialize_dat
 inline static int igbinary_unserialize_array(struct igbinary_unserialize_data *igsd, enum igbinary_type t, zval *z, int flags TSRMLS_DC);
 inline static int igbinary_unserialize_object(struct igbinary_unserialize_data *igsd, enum igbinary_type t, zval *z, int flags TSRMLS_DC);
 inline static int igbinary_unserialize_object_ser(struct igbinary_unserialize_data *igsd, enum igbinary_type t, zval *z, zend_class_entry *ce TSRMLS_DC);
-inline static int igbinary_unserialize_ref(struct igbinary_unserialize_data *igsd, enum igbinary_type t, zval *z TSRMLS_DC);
+inline static int igbinary_unserialize_ref(struct igbinary_unserialize_data *igsd, enum igbinary_type t, zval *z, int flags TSRMLS_DC);
 
 static int igbinary_unserialize_zval(struct igbinary_unserialize_data *igsd, zval *z, int flags TSRMLS_DC);
 /* }}} */
@@ -1101,7 +1103,9 @@ inline static int igbinary_serialize_array_ref(struct igbinary_serialize_data *i
 		return 1;
 	}
 
-	// printf("\nkey=%lld is_ref=%d type=%d\n", (long long)key, (int)is_ref, (int)Z_TYPE_P(z));
+#ifdef DEBUG_SERIALIZATION
+	printf("\nkey=%lld is_ref=%d type=%d\n", (long long)key, (int)is_ref, (int)Z_TYPE_P(z));
+#endif
 
 
 	if (hash_si_find(&igsd->references, (const char*) &key, sizeof(key), i) == 1) {
@@ -1114,7 +1118,9 @@ inline static int igbinary_serialize_array_ref(struct igbinary_serialize_data *i
 		enum igbinary_type type;
 		if (*i <= 0xff) {
 			type = object ? igbinary_type_objref8 : igbinary_type_ref8;
-			//printf("\nserializing key=%lld is_ref=%d type=%d igbinary_type=%d\n", (long long)key, (int)is_ref, (int)Z_TYPE_P(z), (int)type);
+#ifdef DEBUG_SERIALIZATION
+			printf("\nserializing key=%lld is_ref=%d type=%d igbinary_type=%x\n", (long long)key, (int)is_ref, (int)Z_TYPE_P(z), (int)type);
+#endif
 			if (igbinary_serialize8(igsd, (uint8_t) type TSRMLS_CC) != 0) {
 				return 1;
 			}
@@ -1530,7 +1536,9 @@ inline static int igbinary_serialize_object(struct igbinary_serialize_data *igsd
 /** Serialize zval. */
 static int igbinary_serialize_zval(struct igbinary_serialize_data *igsd, zval *z TSRMLS_DC) {
 	if (Z_ISREF_P(z)) {
-		//printf("\nserializing reference is_ref=yes igbinary_type=%d\n", (int)igbinary_type_ref);
+#ifdef DEBUG_SERIALIZATION
+		printf("\nserializing reference is_ref=yes");
+#endif
 		if (igbinary_serialize8(igsd, (uint8_t) igbinary_type_ref TSRMLS_CC) != 0) {
 			return 1;
 		}
@@ -1887,6 +1895,8 @@ inline static int igbinary_unserialize_chararray(struct igbinary_unserialize_dat
 /* {{{ igbinary_unserialize_array */
 /** Unserializes array. */
 inline static int igbinary_unserialize_array(struct igbinary_unserialize_data *igsd, enum igbinary_type t, zval *z, int flags TSRMLS_DC) {
+	// WANT_OBJECT means that z will be an object (if dereferenced)
+	// WANT_REF means that z will be wrapped by an IS_REFERENCE
 	size_t n;
 	size_t i;
 
@@ -1955,11 +1965,18 @@ inline static int igbinary_unserialize_array(struct igbinary_unserialize_data *i
 	}
 	z_deref = z;
 	if (flags & WANT_REF) {
+#ifdef DEBUG_SERIALIZATION
+		printf("\nigbinary_unserialize_array optionally converting array_ref is_ref=%d type=%d igbinary_type=%x\n", (int)Z_ISREF_P(z), (int)Z_TYPE_P(z), (int)t);
+#endif
 		if (!Z_ISREF_P(z)) {
 			ZVAL_NEW_REF(z, z);
 			z_deref = Z_REFVAL_P(z);
 		}
 	}
+
+#ifdef DEBUG_SERIALIZATION
+		printf("\nigbinary_unserialize_array going to add elements is_ref=%d type=%d igbinary_type=%x\n", (int)Z_ISREF_P(z), (int)Z_TYPE_P(z), (int)t);
+#endif
 
 	/* empty array */
 	if (n == 0) {
@@ -2240,17 +2257,24 @@ inline static int igbinary_unserialize_object(struct igbinary_unserialize_data *
 				r = 1;
 				break;
 			}
-			// printf("\nunserializing object n=%lld is_ref=%d type=%d igbinary_type=%d\n", (long long)ref_n, (int)Z_ISREF_P(IGB_REF_VAL(igsd, ref_n)), (int)Z_TYPE_P(IGB_REF_VAL(igsd, ref_n)), (int)t);
+			// TODO: This should be dereferenced if necessary
 			if (incomplete_class) {
 				php_store_class_name(IGB_REF_VAL(igsd, ref_n), name, name_len);
 			}
 			r = igbinary_unserialize_array(igsd, t, IGB_REF_VAL(igsd, ref_n), WANT_OBJECT TSRMLS_CC);
-			// printf("\nunserializing object step 2 n=%lld is_ref=%d type=%d igbinary_type=%d\n", (long long)ref_n, (int)Z_ISREF_P(IGB_REF_VAL(igsd, ref_n)), (int)Z_TYPE_P(IGB_REF_VAL(igsd, ref_n)), (int)t);
+#ifdef DEBUG_SERIALIZATION
+			printf("\nunserializing array_ref n=%lld is_ref=%d type=%d igbinary_type=%x r=%d\n", (long long)ref_n, (int)Z_ISREF_P(IGB_REF_VAL(igsd, ref_n)), (int)Z_TYPE_P(IGB_REF_VAL(igsd, ref_n)), (int)t, (int)r);
+#endif
+			// printf("\nunserializing object step 2 n=%lld is_ref=%d type=%d igbinary_type=%x\n", (long long)ref_n, (int)Z_ISREF_P(IGB_REF_VAL(igsd, ref_n)), (int)Z_TYPE_P(IGB_REF_VAL(igsd, ref_n)), (int)t);
 			break;
 		case igbinary_type_object_ser8:
 		case igbinary_type_object_ser16:
 		case igbinary_type_object_ser32:
+
 			r = igbinary_unserialize_object_ser(igsd, t, IGB_REF_VAL(igsd, ref_n), ce TSRMLS_CC);
+#ifdef DEBUG_SERIALIZATION
+			printf("\nunserializing object_ser n=%lld is_ref=%d type=%d igbinary_type=%x r=%d\n", (long long)ref_n, (int)Z_ISREF_P(IGB_REF_VAL(igsd, ref_n)), (int)Z_TYPE_P(IGB_REF_VAL(igsd, ref_n)), (int)t, (int)r);
+#endif
 			if (r == 0 && incomplete_class) {
 				php_store_class_name(IGB_REF_VAL(igsd, ref_n), name, name_len);
 			}
@@ -2260,14 +2284,16 @@ inline static int igbinary_unserialize_object(struct igbinary_unserialize_data *
 			r = 1;
 	}
 
+	// If unserialize was successful, call __wakeup if __wakeup exists for this object.
 	if (r == 0) {
-		// TODO helper function
 		zval *ztemp = IGB_REF_VAL(igsd, ref_n);
 		zend_class_entry *ztemp_ce;
 		if (Z_ISREF_P(ztemp)) {  // May have created a reference while deserializing an object, if it was recursive.
 			ztemp = Z_REFVAL_P(ztemp);
 		}
-		// printf("\nunserializing n=%lld is_ref=%d type=%d igbinary_type=%d\n", (long long)ref_n, (int)Z_ISREF_P(ztemp), (int)Z_TYPE_P(ztemp), (int)t);
+#ifdef DEBUG_SERIALIZATION
+		printf("\nunserializing before __wakeup n=%lld is_ref=%d type=%d igbinary_type=%x\n", (long long)ref_n, (int)Z_ISREF_P(ztemp), (int)Z_TYPE_P(ztemp), (int)t);
+#endif
 		if (Z_TYPE_P(ztemp) != IS_OBJECT) {
 			zend_error(E_WARNING, "igbinary_unserialize_object preparing to __wakeup: created non-object somehow?", t, igsd->buffer_offset);
 			return 1;
@@ -2295,7 +2321,7 @@ inline static int igbinary_unserialize_object(struct igbinary_unserialize_data *
 /* }}} */
 /* {{{ igbinary_unserialize_ref */
 /** Unserializes array or object by reference. */
-inline static int igbinary_unserialize_ref(struct igbinary_unserialize_data *igsd, enum igbinary_type t, zval *z TSRMLS_DC) {
+inline static int igbinary_unserialize_ref(struct igbinary_unserialize_data *igsd, enum igbinary_type t, zval *z, int flags TSRMLS_DC) {
 	size_t n;
 	zval* z_ref = NULL;
 
@@ -2339,19 +2365,29 @@ inline static int igbinary_unserialize_ref(struct igbinary_unserialize_data *igs
 	// Permanently convert the zval in IGB_REF_VAL() into a IS_REFERENCE if it wasn't already one.
 	// TODO: Can there properly be multiple reference groups to an object?
 	// Similar to https://github.com/php/php-src/blob/master/ext/standard/var_unserializer.re , for "R:"
-	ZVAL_MAKE_REF(z_ref);
-	ZVAL_COPY(z, z_ref);
-	if (t == igbinary_type_ref8) {
-		// printf("\nunserializing n=%lld is_ref=%d type=%d igbinary_type=%d\n", (long long)n, (int)Z_ISREF_P(z), (int)Z_TYPE_P(z), (int)t);
+	// Using `flags` because igbinary_unserialize_ref might be used both for copy on writes ($a = $b = [2]) and by PHP references($a = &$b), if I understand correctly.
+	if ((flags & WANT_REF) != 0) {
+#ifdef DEBUG_SERIALIZATION
+		printf("\nunserializing WANT_REF n=%lld is_ref=%d type=%d igbinary_type=%x\n", (long long)n, (int)Z_ISREF_P(z_ref), (int)Z_TYPE_P(z_ref), (int)t);
+#endif
+		ZVAL_MAKE_REF(z_ref); // probably not necessary?
+		ZVAL_COPY(z, z_ref);
+	} else {
+#ifdef DEBUG_SERIALIZATION
+		printf("\nunserializing non-reference n=%lld is_ref=%d type=%d igbinary_type=%x\n", (long long)n, (int)Z_ISREF_P(z_ref), (int)Z_TYPE_P(z_ref), (int)t);
+#endif
+		// printf("\nunserializing n=%lld is_ref=%d type=%d igbinary_type=%x\n", (long long)n, (int)Z_ISREF_P(z), (int)Z_TYPE_P(z), (int)t);
+		ZVAL_COPY(z, z_ref);
+		ZVAL_DEREF(z);
 	}
 	/* FIXME(tyson) figure out which are IS_REFERENCE, which aren't, and cast the types to that. Also test/fix reference counts for garbage collection. */
-	if (t == igbinary_type_objref8 || t == igbinary_type_objref16 || t == igbinary_type_objref32) {
+	/* if (t == igbinary_type_objref8 || t == igbinary_type_objref16 || t == igbinary_type_objref32) { */
 			/* ZVAL_MAKE_REF(z); */
 			/* ZVAL_DEREF(z); */
 		/* FIXME: clear/set ref.. */
 		/*Z_SET_ISREF_TO_P(z, false);*/
 		/*ZVAL_MAKE_REF(z);*/
-	}
+	/*} */
 
 	return 0;
 }
@@ -2376,9 +2412,16 @@ static int igbinary_unserialize_zval(struct igbinary_unserialize_data *igsd, zva
 
 	switch (t) {
 		case igbinary_type_ref:
+#ifdef DEBUG_SERIALIZATION
+			printf("\nigbinary_unserialize_zval begin igbinary_type_ref\n");
+#endif
 			if (igbinary_unserialize_zval(igsd, z, WANT_REF TSRMLS_CC)) {
 				return 1;
 			}
+#ifdef DEBUG_SERIALIZATION
+			printf("igbinary_unserialize_zval end igbinary_type_ref is_ref=%d type=%d igbinary_type=igbinary_type_ref\n", (int)Z_ISREF_P(z), (int)Z_TYPE_P(z));
+#endif
+
 
 			// FIXME is this possible?
 			if (Z_ISREF_P(z)) {
@@ -2412,7 +2455,7 @@ static int igbinary_unserialize_zval(struct igbinary_unserialize_data *igsd, zva
 		case igbinary_type_ref8:
 		case igbinary_type_ref16:
 		case igbinary_type_ref32:
-			if (igbinary_unserialize_ref(igsd, t, z TSRMLS_CC)) {
+			if (igbinary_unserialize_ref(igsd, t, z, flags TSRMLS_CC)) {
 				return 1;
 			}
 			break;
