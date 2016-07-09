@@ -1090,9 +1090,21 @@ inline static int igbinary_serialize_array_ref(struct igbinary_serialize_data *i
 	// Similar to php_var_serialize_intern's first part, as well as php_add_var_hash, for printing R: (reference) or r:(object)
 	// However, it differs from the built in serialize() in that references to objects are preserved when serializing and unserializing? (TODO check, test for backwards compatibility)
 	zend_bool is_ref = Z_ISREF_P(z);
-	if (is_ref || Z_TYPE_P(z) == IS_OBJECT) {
+	zend_bool is_object = Z_TYPE_P(z) == IS_OBJECT;
+	if (is_ref || is_object) {
 		// is_ref || IS_OBJECT implies it has a unique refcounted struct
-		key = (zend_ulong) (zend_uintptr_t) Z_COUNTED_P(z);
+		if (is_ref && (Z_TYPE_P(Z_REFVAL_P(z)) == IS_OBJECT)) {
+			is_object = true;
+			key = (zend_ulong) (zend_uintptr_t) Z_COUNTED_P(Z_REFVAL_P(z));
+#ifdef DEBUG_SERIALIZATION
+			printf("\nUsing dereferenced object is_ref=%d type=%d key=%lld\n", (int)Z_ISREF_P(z), (int)Z_TYPE_P(z), (long long) key);
+#endif
+		} {
+			key = (zend_ulong) (zend_uintptr_t) Z_COUNTED_P(z);
+#ifdef DEBUG_SERIALIZATION
+			printf("\nUsing regular ref is_ref=%d type=%d key=%lld\n", (int)Z_ISREF_P(z), (int)Z_TYPE_P(z), (long long) key);
+#endif
+		}
 	} else if (Z_TYPE_P(z) == IS_ARRAY) {
 		const zend_array* arr = Z_ARR_P(z);
 		// Use the pointer to the zend_array
@@ -1110,11 +1122,17 @@ inline static int igbinary_serialize_array_ref(struct igbinary_serialize_data *i
 
 	if (hash_si_find(&igsd->references, (const char*) &key, sizeof(key), i) == 1) {
 		t = igsd->references_id++;
-		if (t > 0) {  // FIXME hack?
+		// FIXME hack? If the top-level element was an array, we assume that it can't be a reference when we serialize it,
+		// because that's the way it was serialized in php5.
+		// Does this work with different forms of recursive arrays?
+		if (t > 0 || is_object) {
 			hash_si_insert(&igsd->references, (const char*) &key, sizeof(key), t);  // TODO: Add a specialization for fixed-length numeric keys?
 		}
 		return 1;
 	} else {
+#ifdef DEBUG_SERIALIZATION
+        printf("\nhash_si_find FOUND is_ref=%d type=%d key=%lld\n", (int)Z_ISREF_P(z), (int)Z_TYPE_P(z), (long long) key);
+#endif
 		enum igbinary_type type;
 		if (*i <= 0xff) {
 			type = object ? igbinary_type_objref8 : igbinary_type_ref8;

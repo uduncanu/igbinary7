@@ -94,3 +94,17 @@ SIMPLE_REF := '25' ARRAY_REF
           0600 (0 => )
           25 (is ref)
             01 00 (The top-level array reference in the hash)
+
+; 17044f626a3414021107004f626a34006106641109004f626a34006f626a2200
+; 17044f626a3414021107004f626a34006106641109004f626a34006f626a1a0014020e0106640e022201 (incorrect)
+; $foo= Obj4{private $a=100, private $obj=$foo}
+17 (object 8)
+  04 4f727a34 ((Name length is 4) "Obj4"
+  14 (array8 of properties)
+    02 (2 properties)
+	  11 07 004f626a340061 (string 8) (8 =>
+	    06 (number)
+		  64 (100)
+	  11 09 004f626a34006f626a
+	    22 (obj ref)
+		  00 (The top level object)
