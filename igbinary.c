@@ -378,6 +378,32 @@ PHP_MINFO_FUNCTION(igbinary) {
 	DISPLAY_INI_ENTRIES();
 }
 /* }}} */
+
+/* {{{ igsd management */
+// Append to list of references to take out later
+static inline int igsd_append_ref(struct igbinary_unserialize_data *igsd, zval *z)
+{
+	size_t ref_n;
+	if (igsd->references_count + 1 >= igsd->references_capacity) {
+		while (igsd->references_count + 1 >= igsd->references_capacity) {
+			igsd->references_capacity *= 2;
+		}
+
+		igsd->references = erealloc(igsd->references, sizeof(igsd->references[0]) * igsd->references_capacity);
+		if (igsd->references == NULL) {
+			return -1;
+		}
+	}
+
+
+	ref_n = igsd->references_count++;
+	/* printf("#%d igsd_append_ref called is_ref=%d type=%d addr=%llx\n", (int)ref_n, (int)Z_ISREF_P(z), (int)Z_TYPE_P(z), (long long)z); */
+	/*ZVAL_UNDEF(IGB_REF_VAL(igsd, ref_n));*/
+	IGB_REF_VAL(igsd, ref_n) = z;
+	return ref_n;
+}
+/* }}} */
+
 /* {{{ Memory allocator wrappers */
 static inline void *igbinary_mm_wrapper_malloc(size_t size, void *context)
 {
@@ -1091,20 +1117,24 @@ inline static int igbinary_serialize_array_ref(struct igbinary_serialize_data *i
 	// However, it differs from the built in serialize() in that references to objects are preserved when serializing and unserializing? (TODO check, test for backwards compatibility)
 	zend_bool is_ref = Z_ISREF_P(z);
 	zend_bool is_object = Z_TYPE_P(z) == IS_OBJECT;
+	// Do I have to dereference object references so that reference ids will be the same as in php5?
+	// If I do, then more tests fail.
+	// is_ref || IS_OBJECT implies it has a unique refcounted struct
 	if (is_ref || is_object) {
-		// is_ref || IS_OBJECT implies it has a unique refcounted struct
+		/*
 		if (is_ref && (Z_TYPE_P(Z_REFVAL_P(z)) == IS_OBJECT)) {
 			is_object = true;
 			key = (zend_ulong) (zend_uintptr_t) Z_COUNTED_P(Z_REFVAL_P(z));
 #ifdef DEBUG_SERIALIZATION
 			printf("\nUsing dereferenced object is_ref=%d type=%d key=%lld\n", (int)Z_ISREF_P(z), (int)Z_TYPE_P(z), (long long) key);
 #endif
-		} {
+		} else {
+		*/
 			key = (zend_ulong) (zend_uintptr_t) Z_COUNTED_P(z);
 #ifdef DEBUG_SERIALIZATION
 			printf("\nUsing regular ref is_ref=%d type=%d key=%lld\n", (int)Z_ISREF_P(z), (int)Z_TYPE_P(z), (long long) key);
 #endif
-		}
+		/* } */
 	} else if (Z_TYPE_P(z) == IS_ARRAY) {
 		const zend_array* arr = Z_ARR_P(z);
 		// Use the pointer to the zend_array
@@ -1965,20 +1995,9 @@ inline static int igbinary_unserialize_array(struct igbinary_unserialize_data *i
 		// FIXME Are there cases where WANT_REF is necessary? Trying to preserve php5 compatibility.
 		/* if (flags & WANT_REF) { */
 			/* references */
-			if (igsd->references_count + 1 >= igsd->references_capacity) {
-				while (igsd->references_count + 1 >= igsd->references_capacity) {
-					igsd->references_capacity *= 2;
-				}
-
-				igsd->references = erealloc(igsd->references, sizeof(igsd->references[0]) * igsd->references_capacity);
-				if (igsd->references == NULL)
-					return 1;
-			}
-
-			/*ZVAL_COPY_VALUE(IGB_REF_VAL(igsd, igsd->references_count++), z);*/
-			IGB_REF_VAL(igsd, igsd->references_count++) = z;
-			/* ZVAL_MAKE_REF(z); */
-			/* ZVAL_DEREF(z); */
+		if (igsd_append_ref(igsd, z) == -1) {
+			return 1;
+		}
 		/* } */
 	}
 	z_deref = z;
@@ -2251,19 +2270,10 @@ inline static int igbinary_unserialize_object(struct igbinary_unserialize_data *
 
 
 	/* reference */
-	if (igsd->references_count + 1 >= igsd->references_capacity) {
-		while (igsd->references_count + 1 >= igsd->references_capacity) {
-			igsd->references_capacity *= 2;
-		}
-
-		igsd->references = erealloc(igsd->references, sizeof(igsd->references[0]) * igsd->references_capacity);
-		if (igsd->references == NULL)
-			return 1;
+	ref_n = igsd_append_ref(igsd, z);
+	if (ref_n == -1) {
+		return 1;
 	}
-
-	ref_n = igsd->references_count++;
-	/*ZVAL_UNDEF(IGB_REF_VAL(igsd, ref_n));*/
-	IGB_REF_VAL(igsd, ref_n) = z;
 
 	t = (enum igbinary_type) igbinary_unserialize8(igsd TSRMLS_CC);
 	switch (t) {
@@ -2367,7 +2377,7 @@ inline static int igbinary_unserialize_ref(struct igbinary_unserialize_data *igs
 	}
 
 	if (n >= igsd->references_count) {
-		zend_error(E_WARNING, "igbinary_unserialize_ref: invalid reference");
+		zend_error(E_WARNING, "igbinary_unserialize_ref: invalid reference %zu >= %zu", (int) n, (int)igsd->references_count);
 		return 1;
 	}
 
@@ -2419,7 +2429,6 @@ static int igbinary_unserialize_zval(struct igbinary_unserialize_data *igsd, zva
 	double tmp_double;
 	char *tmp_chararray;
 	size_t tmp_size_t;
-	size_t ref_n;
 
 	if (igsd->buffer_offset + 1 > igsd->buffer_size) {
 		zend_error(E_WARNING, "igbinary_unserialize_zval: end-of-data");
@@ -2446,25 +2455,28 @@ static int igbinary_unserialize_zval(struct igbinary_unserialize_data *igsd, zva
 				break;
 			}
 
-
-			/* reference */
-			if (igsd->references_count + 1 >= igsd->references_capacity) {
-				while (igsd->references_count + 1 >= igsd->references_capacity) {
-					igsd->references_capacity *= 2;
-				}
-
-				igsd->references = erealloc(igsd->references, sizeof(igsd->references[0]) * igsd->references_capacity);
-				if (igsd->references == NULL)
-					return 1;
+			switch (Z_TYPE_P(z)) {
+				case IS_STRING:
+				case IS_LONG:
+				case IS_NULL:
+				case IS_DOUBLE:
+				case IS_FALSE:
+				case IS_TRUE:
+					/* reference */
+					if (igsd_append_ref(igsd, z) == -1) {
+						return 1;
+					}
+					break;
+				default:
+					// printf("igbinary_unserialize_zval end unknown igbinary_type_ref is_ref=%d type=%d igbinary_type=igbinary_type_ref\n", (int)Z_ISREF_P(z), (int)Z_TYPE_P(z));
+					break;
 			}
-			ref_n = igsd->references_count++;
-
-
 			// Permanently convert the zval in IGB_REF_VAL() into a IS_REFERENCE if it wasn't already one.
 			// TODO: Can there properly be multiple reference groups to an object?
 			// Similar to https://github.com/php/php-src/blob/master/ext/standard/var_unserializer.re , for "R:"
 			ZVAL_MAKE_REF(z);
-			IGB_REF_VAL(igsd, ref_n) = z;
+
+
 			/*ZVAL_COPY_VALUE(IGB_REF_VAL(igsd, ref_n), z);*/
 			break;
 		case igbinary_type_objref8:
@@ -2490,7 +2502,7 @@ static int igbinary_unserialize_zval(struct igbinary_unserialize_data *igsd, zva
 		case igbinary_type_array8:
 		case igbinary_type_array16:
 		case igbinary_type_array32:
-			if (igbinary_unserialize_array(igsd, t, z, flags TSRMLS_CC)) {
+			if (igbinary_unserialize_array(igsd, t, z, flags & (~WANT_OBJECT) TSRMLS_CC)) {
 				return 1;
 			}
 			break;
