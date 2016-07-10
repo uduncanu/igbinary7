@@ -1116,32 +1116,25 @@ inline static int igbinary_serialize_array_ref(struct igbinary_serialize_data *i
 	// Similar to php_var_serialize_intern's first part, as well as php_add_var_hash, for printing R: (reference) or r:(object)
 	// However, it differs from the built in serialize() in that references to objects are preserved when serializing and unserializing? (TODO check, test for backwards compatibility)
 	zend_bool is_ref = Z_ISREF_P(z);
-	zend_bool is_object = Z_TYPE_P(z) == IS_OBJECT;
+	zend_bool is_object = ;
 	// Do I have to dereference object references so that reference ids will be the same as in php5?
 	// If I do, then more tests fail.
 	// is_ref || IS_OBJECT implies it has a unique refcounted struct
-	if (is_ref || is_object) {
-		/*
-		if (is_ref && (Z_TYPE_P(Z_REFVAL_P(z)) == IS_OBJECT)) {
-			is_object = true;
-			key = (zend_ulong) (zend_uintptr_t) Z_COUNTED_P(Z_REFVAL_P(z));
+	if (object && is_object) {
+          key = (zend_ulong) Z_OBJ_HANDLE_P(z); // expand uint32_t to long
 #ifdef DEBUG_SERIALIZATION
-			printf("\nUsing dereferenced object is_ref=%d type=%d key=%lld\n", (int)Z_ISREF_P(z), (int)Z_TYPE_P(z), (long long) key);
+          printf("\nSerializing object=true key(object handle)=%lld\n", (long long) key);
 #endif
-		} else {
-		*/
-			key = (zend_ulong) (zend_uintptr_t) Z_COUNTED_P(z);
+	} else if (is_ref) {
+	  key = (zend_ulong) (zend_uintptr_t) Z_COUNTED_P(z);
 #ifdef DEBUG_SERIALIZATION
-			printf("\nUsing regular ref is_ref=%d type=%d key=%lld\n", (int)Z_ISREF_P(z), (int)Z_TYPE_P(z), (long long) key);
+          printf("\nUsing regular ref is_ref=%d type=%d key=%lld\n", (int)Z_ISREF_P(z), (int)Z_TYPE_P(z), (long long) key);
 #endif
-		/* } */
-	} else if (Z_TYPE_P(z) == IS_ARRAY) {
-		const zend_array* arr = Z_ARR_P(z);
-		// Use the pointer to the zend_array
-		key = (zend_ulong) (zend_uintptr_t) arr;
+	/* } */
 	} else {
 		// Nothing else is going to reference this when this is serialized, this isn't ref counted or an object. Increment the reference id for the deserializer, give up.
 		++igsd->references_id;
+                php_error_docref(NULL TSRMLS_CC, E_NOTICE, "igbinary_serialize_array_ref expected object or reference, got neither");
 		return 1;
 	}
 
@@ -1593,7 +1586,7 @@ static int igbinary_serialize_zval(struct igbinary_serialize_data *igsd, zval *z
 
 		/* Complex types serialize a reference, scalars do not... */
 		/* FIXME: Absolutely wrong level to check this. */
-		if (igbinary_serialize_array_ref(igsd, z, (Z_TYPE_P(Z_REFVAL_P(z)) == IS_OBJECT) TSRMLS_CC) == 0) {
+		if (igbinary_serialize_array_ref(igsd, z, false TSRMLS_CC) == 0) {
 			return 0;
 		}
 		ZVAL_DEREF(z);
