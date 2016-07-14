@@ -1974,20 +1974,24 @@ inline static int igbinary_unserialize_array(struct igbinary_unserialize_data *i
 		return 1;
 	}
 
+	z_deref = z;
 	if ((flags & WANT_OBJECT) == 0) {
 		array_init_size(z, n + 1);
-		/* add the new array to the list of unserialized references */
-		if (igsd_append_ref(igsd, z) == SIZE_MAX) {
-			return 1;
+
+		if (flags & WANT_REF) {
+
+			/* add the new array to the list of unserialized references */
+			if (igsd_append_ref(igsd, z) == SIZE_MAX) {
+				return 1;
+			}
+
+			if (!Z_ISREF_P(z)) {
+				ZVAL_NEW_REF(z, z);
+				z_deref = Z_REFVAL_P(z);
+			}
 		}
 	}
-	z_deref = z;
-	if (flags & WANT_REF) {
-		if (!Z_ISREF_P(z)) {
-			ZVAL_NEW_REF(z, z);
-			z_deref = Z_REFVAL_P(z);
-		}
-	}
+
 
 	/* empty array */
 	if (n == 0) {
